@@ -1,35 +1,116 @@
-///<reference path="../../typings/json.d.ts"/>
 import * as Koa from "koa";
 import * as bodyParser from "koa-bodyparser";
-import * as json from 'koa-json';
-import * as cors from 'kcors';
-import * as session from 'koa-generic-session';
-import * as redisStore from 'koa-redis';
-import * as redisConfig from '../../config/redis-conf.json';
-import requestLogger from './middleware/request-logger';
-import router from './routes';
-import { env } from './lib/node-process';
+import * as json from "koa-json";
+import * as cors from "kcors";
+import * as session from "koa-generic-session";
+import * as redisStore from "koa-redis";
+import APP_CONF from "./config";
+import requestLogger from "./middlewares/request-logger";
+import beforeAPI from "./middlewares/before-api";
+import appRouters from "./routers";
 
-const app = new Koa();
-const AppConfig = {
-  host: 'http://ba.codoon.com',
-  cookieName: 'ba.codoon'
+interface AppConfig {
+  signedCookieKeys: string[],
+  corsConfig: cors.Options
+  sessionConfig: any
+}
+
+class App {
+  private _app: Koa;
+  private _signedCookieKeys: string[];
+  private _corsConfig: cors.Options;
+  private _sessionConfig: any;
+
+  constructor(config: AppConfig) {
+    this._app = new Koa();
+    this._signedCookieKeys = config.signedCookieKeys;
+    this._corsConfig = config.corsConfig;
+    this._sessionConfig = config.sessionConfig;
+
+    //Set signed cookie keys
+    this._app.keys = this._signedCookieKeys;
+  }
+
+  //Middleware
+  useBodyParser(): App {
+    this._app.use(bodyParser());
+    return this;
+  }
+
+  userPrettyJson(): App {
+    this._app.use(json());
+    return this;
+  }
+
+  useCors(): App {
+    this._app.use(cors(this._corsConfig));
+    return this;
+  }
+
+  useSession(): App {
+    this._app.use(session(this._sessionConfig));
+    return this;
+  }
+
+  useRequestLogger(): App {
+    this._app.use(requestLogger());
+    return this;
+  }
+
+  //Before API
+  checkSession(): App {
+    this._app.use(beforeAPI.checkSession());
+    return this;
+  }
+
+  checkAPIRoutes(): App {
+    this._app.use(beforeAPI.checkAPIRoutes());
+    return this;
+  }
+
+  //Inject Api
+  injectAPI(): App {
+    this._app.use(appRouters.routes());
+    this._app.use(appRouters.allowedMethods());
+    return this;
+  }
+
+  build(): Koa {
+    return this._app;
+  }
+
+}
+
+const config: AppConfig = {
+  signedCookieKeys: ['Koa', 'xxx'],
+  corsConfig: {
+    origin: 'http://xxx.xxx.com',
+    credentials: true
+  },
+  sessionConfig: {
+    key: 'koa.xxx',
+    ttl: 8 * 1000 * 60 * 60, //8h
+    store: redisStore({auth_pass: APP_CONF.REDIS_CONF['password']})
+  }
 };
 
-//Set signed cookie keys
-app.keys = ['Ba', 'BaCodoon'];
+const appInstance = new App(config);
 
 //Middleware
-app.use(bodyParser());
-app.use(json());
-app.use(cors({origin: AppConfig.host, credentials: true}));
-app.use(session({
-  key: AppConfig.cookieName,
-  ttl: 8 * 1000 * 60 * 60, //8h
-  store: redisStore({auth_pass: redisConfig[env]['password']})
-}));
-app.use(requestLogger());
+appInstance
+  .useBodyParser()
+  .userPrettyJson()
+  .useCors()
+  .useSession()
+  .useRequestLogger();
 
-router(app);
+//Before Ba API
+appInstance
+  .checkSession()
+  .checkAPIRoutes();
 
-export default app;
+//Inject Ba Api
+appInstance
+  .injectAPI();
+
+export default appInstance.build();

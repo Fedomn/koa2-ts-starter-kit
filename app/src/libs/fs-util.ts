@@ -1,5 +1,5 @@
-import * as glob from "glob";
 import * as _ from "lodash";
+import * as glob from "glob";
 
 namespace FsUtil {
   export function getExportFileList(inputDirName: string, ignore?: string | string[]): string[] {
